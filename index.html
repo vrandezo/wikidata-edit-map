@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Wikidata edits on a map</title>
+</head>
+
+<body style="background: black;">
+  <canvas id="map" width="1440" height="720"
+          style="border:1px solid #111; background: black;"></canvas>
+  <script>
+const url = 'https://stream.wikimedia.org/v2/stream/revision-create'
+
+console.log(`Connecting to EventStreams at ${url}`)
+const eventSource = new EventSource(url)
+
+eventSource.onopen = event => { console.log('--- Opened connection.') }
+
+eventSource.onerror = event => { console.error('--- Encountered error', event) }
+
+eventSource.onmessage = event => {
+  const data = JSON.parse(event.data)
+  if (data.database !== 'wikidatawiki') return
+  // console.log(data.page_title + ': ' + data.rev_parent_id + ' -> ' +
+  //             data.rev_id + ' ' + data.performer.user_text)
+  fetch(
+    'https://www.wikidata.org/w/api.php?action=query&format=json' +
+    '&prop=revisions&titles=' + data.page_title + '&rvprop=ids%7Ccontent' +
+    '&rvslots=*&rvstartid=' + data.rev_id + '&rvendid=' + data.rev_parent_id +
+    '&origin=*').then(
+      res => res.json()).then(
+      json => process_edit(json)).catch(e => console.log(e))
+}
+
+const canvas = document.getElementById('map')
+const ctx = canvas.getContext('2d')
+
+const get_json = revisions => {
+  try {
+    return JSON.parse(revisions[0].slots.main['*'])
+  } catch(e) {
+    return undefined
+  }
+}
+
+const process_edit = data => {
+  if (data.query === undefined) return
+  const page_id = Object.keys(data.query.pages)[0]
+  const qid = data.query.pages[page_id].title
+  const revisions = data.query.pages[page_id].revisions
+  const rev = get_json(revisions)
+  if (rev === undefined) return
+  const claims = rev.claims
+  if (claims === undefined) return
+  for (const pid of Object.keys(claims)) {
+    for (const claim of claims[pid]) {
+      if (claim.mainsnak.snaktype !== 'value') continue
+      if (claim.mainsnak.datavalue.type !== 'globecoordinate') continue
+      let response = qid
+      if ('en' in rev.labels) response += ' ' + rev.labels.en.value
+      let x = Math.round((claim.mainsnak.datavalue.value.longitude+180)*4)
+      let y = Math.round((90-claim.mainsnak.datavalue.value.latitude)*4)
+      response += ' (' + String(x) + '/' + String(y) + ')'
+      response += ' https://www.wikidata.org/wiki/' + qid
+      const grd= ctx.createRadialGradient(x+10, y+10, 2, x+10, y+10, 10);
+      grd.addColorStop(0.0, 'rgba(255,255,255,1.0)')
+      grd.addColorStop(0.5, 'rgba(16,16,255,0.4)')
+      grd.addColorStop(1.0, 'rgba(0,0,0,0.0)')
+      ctx.fillStyle = grd
+      ctx.fillRect(x, y, 20, 20)
+
+
+      if (Math.random() < 0.02) {
+        ctx.fillStyle = 'rgba(0,0,0,0.01)'
+        ctx.fillRect(0, 0, 1440, 720)
+      }
+      console.log(response)
+    }
+  }
+}
+  </script>
+</body>
+</html>
